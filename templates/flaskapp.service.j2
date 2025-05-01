@@ -1,0 +1,13 @@
+[Unit]
+Description=Flask App Service
+After=network.target
+
+[Service]
+User={{ ansible_user }}
+Group={{ ansible_user }}
+WorkingDirectory=/opt/flaskapp
+ExecStart=/usr/bin/python3 /opt/flaskapp/main.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

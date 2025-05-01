@@ -1,3 +1,4 @@
+# site.yaml
 ---
 - name: Configure Web Servers
   hosts: webservers
@@ -52,30 +53,68 @@
         enabled: yes
         state: started
 
+- name: Configure HAProxy Load Balancer
+  hosts: loadbalancer
+  become: yes
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
 
+    - name: Install HAProxy
+      apt:
+        name: haproxy
+        state: present
+
+    - name: Deploy HAProxy configuration
+      template:
+        src: templates/haproxy.cfg.j2
+        dest: /etc/haproxy/haproxy.cfg
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart HAProxy # Trigger handler on change
+
+    - name: Ensure HAProxy service is enabled and started
+      systemd:
+        name: haproxy
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: Restart HAProxy
+      systemd:
+        name: haproxy
+        state: restarted
 
 - name: Verify Application Deployment
-  hosts: loadbalancer  # Changed from localhost to HAproxy
-  gather_facts: yes
+  hosts: localhost # Run locally on the control node (where ansible-playbook is executed)
+  connection: local
+  gather_facts: no
   vars:
+    # Get the public IP of HAproxy from inventory facts
+    haproxy_ip: "{{ hostvars[groups['HAproxy'][0]]['ansible_host'] | default(groups['HAproxy'][0]) }}"
     expected_hosts: "{{ groups['webservers'] }}" # Get list of webserver hostnames
   tasks:
     - name: Wait for HAProxy service to be ready
       wait_for:
-        host: "127.0.0.1"  # Check locally from HAproxy
+        host: "{{ haproxy_ip }}"
         port: 80
         timeout: 30
         delay: 5
+      delegate_to: localhost
 
     - name: Check application response multiple times to hit all backends
       uri:
-        url: "http://127.0.0.1/"  # Use localhost from HAproxy's perspective
+        url: "http://{{ haproxy_ip }}/"
         method: GET
         return_content: yes
         status_code: 200
       register: curl_results
       # Loop enough times to likely hit all servers with round-robin
       loop: "{{ range(0, expected_hosts | length * 3 ) | list }}"
+      delegate_to: localhost
       ignore_errors: yes # Ignore individual failures, we check the aggregate later
 
     - name: Extract responding hostnames
@@ -93,5 +132,5 @@
           # Convert list to set to get unique hosts, then back to list and sort
           # Sort expected_hosts as well for reliable comparison
           - (responded_hosts | unique | sort) == (expected_hosts | sort)
-        fail_msg: "Verification failed! Expected responses from {{ expected_hosts | sort }}, but received from {{ responded_hosts | default([]) | unique | sort }}. Check backend services."
+        fail_msg: "Verification failed! Expected responses from {{ expected_hosts | sort }}, but received from {{ responded_hosts | default([]) | unique | sort }}. Check HAProxy IP {{ haproxy_ip }} and backend services."
         success_msg: "Verification successful! Received responses from all expected hosts: {{ responded_hosts | unique | sort }}"
