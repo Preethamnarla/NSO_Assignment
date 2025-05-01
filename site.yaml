@@ -1,0 +1,97 @@
+---
+- name: Configure Web Servers
+  hosts: webservers
+  become: yes # Most tasks require root privileges
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600 # Update only if cache is older than 1 hour
+
+    - name: Install required packages
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - python3
+        - python3-pip
+
+    - name: Install Flask using pip3
+      pip:
+        name: flask
+        executable: pip3 # Explicitly use pip3
+
+    - name: Create application directory
+      file:
+        path: /opt/flaskapp
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Copy Flask application file
+      copy:
+        src: main.py
+        dest: /opt/flaskapp/main.py
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+
+    - name: Copy systemd service file
+      template:
+        src: templates/flaskapp.service.j2
+        dest: /etc/systemd/system/flaskapp.service
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Reload systemd daemon, enable and start flaskapp service
+      systemd:
+        name: flaskapp
+        daemon_reload: yes
+        enabled: yes
+        state: started
+
+
+
+- name: Verify Application Deployment
+  hosts: loadbalancer  # Changed from localhost to HAproxy
+  gather_facts: yes
+  vars:
+    expected_hosts: "{{ groups['webservers'] }}" # Get list of webserver hostnames
+  tasks:
+    - name: Wait for HAProxy service to be ready
+      wait_for:
+        host: "127.0.0.1"  # Check locally from HAproxy
+        port: 80
+        timeout: 30
+        delay: 5
+
+    - name: Check application response multiple times to hit all backends
+      uri:
+        url: "http://127.0.0.1/"  # Use localhost from HAproxy's perspective
+        method: GET
+        return_content: yes
+        status_code: 200
+      register: curl_results
+      # Loop enough times to likely hit all servers with round-robin
+      loop: "{{ range(0, expected_hosts | length * 3 ) | list }}"
+      ignore_errors: yes # Ignore individual failures, we check the aggregate later
+
+    - name: Extract responding hostnames
+      set_fact:
+        # Extract hostname (3rd word) from responses like "Hello from devX at ..."
+        # Use regex_search to be more robust. (?<=from )\S+ looks for non-space chars after "from "
+        responded_hosts: "{{ (responded_hosts | default([])) + [ item.content | regex_search('(?<=from )\\S+') ] }}"
+      loop: "{{ curl_results.results | selectattr('status', 'defined') | selectattr('status', '==', 200) }}" # Only process successful requests
+      when: item.content is defined and item.content | regex_search('(?<=from )\\S+')
+
+    - name: Verify all expected webservers responded at least once
+      assert:
+        that:
+          - responded_hosts is defined
+          # Convert list to set to get unique hosts, then back to list and sort
+          # Sort expected_hosts as well for reliable comparison
+          - (responded_hosts | unique | sort) == (expected_hosts | sort)
+        fail_msg: "Verification failed! Expected responses from {{ expected_hosts | sort }}, but received from {{ responded_hosts | default([]) | unique | sort }}. Check backend services."
+        success_msg: "Verification successful! Received responses from all expected hosts: {{ responded_hosts | unique | sort }}"
