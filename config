@@ -3,8 +3,22 @@ Host bastionNSO
     User ubuntu
     ForwardAgent yes
 	
-
 Host HAproxy
     HostName 91.106.199.227
+    User ubuntu
+    ProxyJump bastionNSO
+
+Host devA
+    HostName 10.1.0.89
+    User ubuntu
+    ProxyJump bastionNSO
+
+Host devB
+    HostName 10.1.0.120
+    User ubuntu
+    ProxyJump bastionNSO
+
+Host devC
+    HostName 10.1.0.103
     User ubuntu
     ProxyJump bastionNSO
