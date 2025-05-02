@@ -4,7 +4,7 @@ devB
 devC
 
 [loadbalancer]
-HAproxy
+HAproxy ansible_host=91.106.199.227
 
 [all:vars]
 ansible_user=ubuntu

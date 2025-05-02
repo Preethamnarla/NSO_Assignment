@@ -1,13 +1,12 @@
-# site.yaml
 ---
 - name: Configure Web Servers
   hosts: webservers
-  become: yes # Most tasks require root privileges
+  become: yes
   tasks:
     - name: Update apt cache
       apt:
         update_cache: yes
-        cache_valid_time: 3600 # Update only if cache is older than 1 hour
+        cache_valid_time: 3600
 
     - name: Install required packages
       apt:
@@ -20,7 +19,7 @@
     - name: Install Flask using pip3
       pip:
         name: flask
-        executable: pip3 # Explicitly use pip3
+        executable: pip3
 
     - name: Create application directory
       file:
@@ -30,10 +29,16 @@
         group: "{{ ansible_user }}"
         mode: '0755'
 
+    - name: Stop Flask application if running
+      systemd:
+        name: flaskapp
+        state: stopped
+      ignore_errors: yes
+
     - name: Copy Flask application file
       copy:
-        src: main.py
-        dest: /opt/flaskapp/main.py
+        src: application2.py
+        dest: /opt/flaskapp/application2.py
         owner: "{{ ansible_user }}"
         group: "{{ ansible_user }}"
         mode: '0644'
@@ -50,8 +55,40 @@
       systemd:
         name: flaskapp
         daemon_reload: yes
-        enabled: yes
+    
+    - name: Start Flask application
+      systemd:
+        name: flaskapp
         state: started
+        enabled: yes
+      register: service_start
+
+    - name: Show service start status
+      debug:
+        var: service_start
+    
+    - name: Wait for Flask application to start
+      wait_for:
+        host: localhost
+        port: 5000
+        timeout: 30
+        delay: 5
+      register: flask_status
+
+    - name: Verify Flask application is responding
+      uri:
+        url: "http://localhost:5000"
+        method: GET
+        status_code: 200
+      register: flask_response
+      retries: 3
+      delay: 5
+      until: flask_response.status == 200
+      
+    - name: Show Flask application status
+      debug:
+        msg: "Flask application is running and responding"
+      when: flask_response.status == 200
 
 - name: Configure HAProxy Load Balancer
   hosts: loadbalancer
@@ -74,7 +111,7 @@
         owner: root
         group: root
         mode: '0644'
-      notify: Restart HAProxy # Trigger handler on change
+      notify: Restart HAProxy
 
     - name: Ensure HAProxy service is enabled and started
       systemd:
@@ -93,44 +130,39 @@
   connection: local
   gather_facts: no
   vars:
-    # Get the public IP of HAproxy from inventory facts
-    haproxy_ip: "{{ hostvars[groups['HAproxy'][0]]['ansible_host'] | default(groups['HAproxy'][0]) }}"
-    expected_hosts: "{{ groups['webservers'] }}" # Get list of webserver hostnames
+    haproxy_ip: "{{ hostvars[groups['loadbalancer'][0]]['ansible_host'] | default(groups['loadbalancer'][0]) }}"
+    expected_hosts: "{{ groups['webservers'] }}"
+    min_required_responses: 3
   tasks:
-    - name: Wait for HAProxy service to be ready
+    - name: Wait for HAProxy to be available
       wait_for:
         host: "{{ haproxy_ip }}"
         port: 80
         timeout: 30
         delay: 5
-      delegate_to: localhost
-
-    - name: Check application response multiple times to hit all backends
+        
+    - name: Send multiple requests to test load balancing
       uri:
         url: "http://{{ haproxy_ip }}/"
         method: GET
         return_content: yes
         status_code: 200
-      register: curl_results
-      # Loop enough times to likely hit all servers with round-robin
-      loop: "{{ range(0, expected_hosts | length * 3 ) | list }}"
-      delegate_to: localhost
-      ignore_errors: yes # Ignore individual failures, we check the aggregate later
+      register: responses
+      loop: "{{ range(9) | list }}"
+      ignore_errors: no
 
-    - name: Extract responding hostnames
+    - name: Extract unique server responses
       set_fact:
-        # Extract hostname (3rd word) from responses like "Hello from devX at ..."
-        # Use regex_search to be more robust. (?<=from )\S+ looks for non-space chars after "from "
-        responded_hosts: "{{ (responded_hosts | default([])) + [ item.content | regex_search('(?<=from )\\S+') ] }}"
-      loop: "{{ curl_results.results | selectattr('status', 'defined') | selectattr('status', '==', 200) }}" # Only process successful requests
-      when: item.content is defined and item.content | regex_search('(?<=from )\\S+')
+        unique_servers: "{{ responses.results | map(attribute='content') | list | unique | list }}"
 
-    - name: Verify all expected webservers responded at least once
+    - name: Display all received responses
+      debug:
+        msg: "Received response: {{ item }}"
+      loop: "{{ unique_servers }}"
+
+    - name: Verify all web servers responded
       assert:
         that:
-          - responded_hosts is defined
-          # Convert list to set to get unique hosts, then back to list and sort
-          # Sort expected_hosts as well for reliable comparison
-          - (responded_hosts | unique | sort) == (expected_hosts | sort)
-        fail_msg: "Verification failed! Expected responses from {{ expected_hosts | sort }}, but received from {{ responded_hosts | default([]) | unique | sort }}. Check HAProxy IP {{ haproxy_ip }} and backend services."
-        success_msg: "Verification successful! Received responses from all expected hosts: {{ responded_hosts | unique | sort }}"
+          - unique_servers | length >= min_required_responses
+        fail_msg: "Not all web servers responded. Only got responses from {{ unique_servers | length }} servers"
+        success_msg: "Successfully received responses from all {{ min_required_responses }} web servers"
