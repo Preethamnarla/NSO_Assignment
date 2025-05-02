@@ -6,7 +6,7 @@ After=network.target
 User={{ ansible_user }}
 Group={{ ansible_user }}
 WorkingDirectory=/opt/flaskapp
-ExecStart=/usr/bin/python3 /opt/flaskapp/main.py
+ExecStart=/usr/bin/python3 /opt/flaskapp/application2.py
 Restart=always
 
 [Install]
