@@ -2,28 +2,23 @@ Host bastionNSO
     HostName 188.95.227.14
     User ubuntu
     ForwardAgent yes
-    StrictHostKeyChecking no
 	
 Host HAproxy
-    HostName 91.106.199.227
+    HostName 10.1.0.118
     User ubuntu
     ProxyJump bastionNSO
-    StrictHostKeyChecking no
 
 Host devA
     HostName 10.1.0.89
     User ubuntu
     ProxyJump bastionNSO
-    StrictHostKeyChecking no
 
 Host devB
     HostName 10.1.0.120
     User ubuntu
     ProxyJump bastionNSO
-    StrictHostKeyChecking no
 
 Host devC
     HostName 10.1.0.103
     User ubuntu
     ProxyJump bastionNSO
-    StrictHostKeyChecking no

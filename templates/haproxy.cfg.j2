@@ -40,9 +40,9 @@ frontend haproxynode
 backend backendnode
     balance roundrobin
     option forwardfor
-    server devA 10.1.0.89:5000 check
-    server devB 10.1.0.120:5000 check
-    server devC 10.1.0.103:5000 check
+    {% for host in groups["webservers"] %}
+	server {{ host }} {{ hostvars[host]["ansible_default_ipv4"]["address"] }}:80 check
+    {% endfor %}
     option httpchk HEAD / HTTP/1.1\r\nHost:\ localhost
 
 listen stats
@@ -50,4 +50,4 @@ listen stats
     stats enable
     stats uri /
     stats realm Haproxy\ Statistics
-    stats auth admin:admin
+    stats auth admin:admin  # Change this in production!
