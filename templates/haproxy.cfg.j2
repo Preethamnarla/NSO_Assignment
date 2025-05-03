@@ -43,7 +43,6 @@ backend backendnode
     {% for host in groups["webservers"] %}
 	server {{ host }} {{ hostvars[host]["ansible_default_ipv4"]["address"] }}:80 check
     {% endfor %}
-    option httpchk HEAD / HTTP/1.1\r\nHost:\ localhost
 
 listen stats
     bind *:8080
