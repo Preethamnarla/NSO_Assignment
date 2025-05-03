@@ -1,3 +1,4 @@
+# site.yaml
 ---
 - name: Configure Web Servers
   hosts: webservers
@@ -111,7 +112,7 @@
         owner: root
         group: root
         mode: '0644'
-      notify: Restart HAProxy
+      notify: Restart HAProxy # Trigger handler on change
 
     - name: Ensure HAProxy service is enabled and started
       systemd:
@@ -126,29 +127,27 @@
         state: restarted
 
 - name: Verify Application Deployment
-  hosts: localhost # Run locally on the control node (where ansible-playbook is executed)
+  hosts: localhost
   connection: local
   gather_facts: no
   vars:
-    haproxy_ip: "{{ hostvars[groups['loadbalancer'][0]]['ansible_host'] | default(groups['loadbalancer'][0]) }}"
-    expected_hosts: "{{ groups['webservers'] }}"
-    min_required_responses: 3
+    min_required_responses: 3   
   tasks:
     - name: Wait for HAProxy to be available
       wait_for:
-        host: "{{ haproxy_ip }}"
+        host: "{{ haproxy_public_ip }}"
         port: 80
         timeout: 30
         delay: 5
         
     - name: Send multiple requests to test load balancing
       uri:
-        url: "http://{{ haproxy_ip }}/"
+        url: "http://{{ haproxy_public_ip }}/"
         method: GET
         return_content: yes
         status_code: 200
       register: responses
-      loop: "{{ range(9) | list }}"
+      loop: "{{ range(9) | list }}"  # Send 9 requests to ensure we hit all servers
       ignore_errors: no
 
     - name: Extract unique server responses
@@ -165,4 +164,4 @@
         that:
           - unique_servers | length >= min_required_responses
         fail_msg: "Not all web servers responded. Only got responses from {{ unique_servers | length }} servers"
-        success_msg: "Successfully received responses from all {{ min_required_responses }} web servers"
+        success_msg: "Successfully received responses from all {{ min_required_responses }} web servers"s
