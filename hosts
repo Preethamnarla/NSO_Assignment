@@ -3,7 +3,7 @@ devA
 devB 
 devC
 
-[loadbalancer]
+[HAproxy]
 HAproxy
 
 [all:vars]

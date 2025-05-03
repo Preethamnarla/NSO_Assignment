@@ -91,7 +91,7 @@
       when: flask_response.status == 200
 
 - name: Configure HAProxy Load Balancer
-  hosts: loadbalancer
+  hosts: HAproxy
   become: yes
   tasks:
     - name: Update apt cache
