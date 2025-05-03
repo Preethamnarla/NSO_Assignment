@@ -18,3 +18,6 @@ The application returns the current time and server hostname:
 Ensure SSH access is configured
 Run the Ansible playbook
 ansible-playbook -i hosts site.yaml
+
+## How to Test
+curl http://91.106.199.227:80
